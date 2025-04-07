@@ -116,7 +116,7 @@ def crop_mask(a):
 
 def generate_random_polygons(array_size, rand_sizes, samples, seed=42):
     # Single-process version
-    np.random.seed(42)
+    np.random.seed(seed)
 
     rand_sizes = list(rand_sizes)
     AREA = {}
@@ -277,7 +277,7 @@ rand_sizes = range(10, 91)
 samples = 256
 
 seed = 42
-#generate_random_polygons(array_size, rand_sizes, samples, seed)
+generate_random_polygons(array_size, rand_sizes, samples, seed)
 
 #rand_size=60
 #plot_all_voronoi_samples_from_file(array_size, rand_size)

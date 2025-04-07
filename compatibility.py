@@ -35,8 +35,8 @@ sample = 163
 lenia_numpy.set_init_voronoi_batch(polygon_size, seeds=seeds, init_polygon_index=0)
 lenia_jax.set_init_voronoi_batch(polygon_size, seeds=seeds, init_polygon_index=0)
 
-numpy_save_path = f"{lenia_numpy.kernel_path}/compatibility/numpy_{lenia_numpy.g_mu}_{lenia_numpy.g_sig}_{polygon_size}_{seeds[0]}_{sample}.gif"
-jax_save_path = f"{lenia_jax.kernel_path}/compatibility/jax_{lenia_jax.g_mu}_{lenia_jax.g_sig}_{polygon_size}_{seeds[0]}_{sample}.gif"
+numpy_save_path = f"{lenia_numpy.kernel_path}/compatibility/cluster_numpy_{lenia_numpy.g_mu}_{lenia_numpy.g_sig}_{polygon_size}_{seeds[0]}_{sample}.gif"
+jax_save_path = f"{lenia_jax.kernel_path}/compatibility/cluster_jax_{lenia_jax.g_mu}_{lenia_jax.g_sig}_{polygon_size}_{seeds[0]}_{sample}.gif"
 
 lenia_numpy.make_video(seeds, polygon_size, init_polygon_index=sample, sim_time=1000, step_size=4, phase='max', save_path=numpy_save_path)
 lenia_jax.make_video(seeds, polygon_size, init_polygon_index=sample, sim_time=1000, step_size=4, phase='max', save_path=jax_save_path)
