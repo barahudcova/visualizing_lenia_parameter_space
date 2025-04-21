@@ -272,12 +272,12 @@ def plot_all_voronoi_samples_from_file(array_size, rand_size):
 #============================== EXAMPLE ================================
 #generate polygons of all sizes between 10 and 90, with 10 samples each, all fitting in a 100x100 array (we want at least 128 samples, but ideally 1024)
 
-array_size = 100
-rand_sizes = range(10, 91)
+array_size = 200
+rand_sizes = range(10, 101)
 samples = 256
 
 seed = 42
-generate_random_polygons(array_size, rand_sizes, samples, seed)
+#generate_random_polygons(array_size, rand_sizes, samples, seed)
 
 #rand_size=60
 #plot_all_voronoi_samples_from_file(array_size, rand_size)

@@ -29,8 +29,8 @@ lenia_numpy = MultiLeniaNumPy((array_size, array_size), batch=1, num_channels=1,
 lenia_jax   = MultiLeniaJAX((array_size, array_size), batch=1, num_channels=1, dt=0.1, params=params)
 
 
-seeds = [4218145047]
-sample = 163
+seeds = [3410421445]
+sample = 142
 
 lenia_numpy.set_init_voronoi_batch(polygon_size, seeds=seeds, init_polygon_index=0)
 lenia_jax.set_init_voronoi_batch(polygon_size, seeds=seeds, init_polygon_index=0)

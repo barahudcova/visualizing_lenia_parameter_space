@@ -1,5 +1,8 @@
 # ignore ALL polygon files
 utils/*.pickle
+*.pickle
+*.json
+*.gif
 
 #ignore everything in .venv directory
 .venv/

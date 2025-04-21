@@ -11,22 +11,9 @@ import io
 
 import cProfile, pstats, io
 from pstats import SortKey
-from lenia_jax_fft import MultiLeniaJAX
 import jax.numpy as jnp
+from lenia_jax_fft import MultiLeniaJAX
 
-
-
-# general discrete Lenia parameters
-n_dim = 2
-space_scale = 13  # space resolution = radius of kernel
-time_scale = 1    # time resolution
-array_div  = 13   # number of levels in world values [0 ... P_a]
-kernel_div = 13   # number of levels in kernel values [0 ... P_k]
-growth_div = 1    # number of levels in growth values [0 ... P_g]
-n_kernels = 1
-
-kernel_radius = space_scale
-rule_params = [n_dim, space_scale, time_scale, array_div, kernel_div, growth_div, n_kernels]
 
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
@@ -117,7 +104,7 @@ def get_phase_video(folder_name, phase, g_mju, g_sig, mode="unif_random_voronoi"
         except:
             continue
         
-def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, mode="unif_random_voronoi", array_size=100, device='cuda'):    
+def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, mode="unif_random_voronoi", array_size=100):    
     for g_mju in g_mju_range:
         for g_sig in g_sig_range:
             g_mju = np.round(g_mju, 4)
@@ -129,19 +116,19 @@ def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_
                     data = pickle.load(f)[str(array_size)]
 
 
-                params = {'k_size': 27, 
-                    'mu': torch.tensor([[[0.1]]], device=device), 
-                    'sigma': torch.tensor([[[0.04]]], device=device), 
-                    'beta': torch.tensor([[[beta]]], device=device), 
-                    'mu_k': torch.tensor([[[k_mju]]], device=device), 
-                    'sigma_k': torch.tensor([[[k_sig]]], device=device), 
-                    'weights': torch.tensor([[[1]]], device=device)}
-                
-                params["mu"][0][0][0] = g_mju
-                params["sigma"][0][0][0] = g_sig
+                params = {
+                    'k_size': 37, 
+                    'mu': jnp.array([[[g_mju]]]), 
+                    'sigma': jnp.array([[[g_sig]]]), 
+                    'beta': jnp.array([[[beta]]]), 
+                    'mu_k': jnp.array([[[k_mju]]]), 
+                    'sigma_k': jnp.array([[[k_sig]]]), 
+                    'weights': jnp.array([[[1.0]]]),
+                    'func_k': func_k,
+                } 
 
-                auto = BatchLeniaMC((1,array_size,array_size), dt=0.1, params=params, num_channels=1, device=device)
-                auto.to(device)
+
+                auto = MultiLeniaJAX((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
 
 
                 polygon_size_range = np.arange(10, 100, 1)
@@ -158,8 +145,8 @@ def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_
                                         print(f"gmju: {g_mju}, gsig: {g_sig}, polygon size {polygon_size} video already exists")
                                     else:
                                         print(f"gmju: {g_mju}, gsig: {g_sig}, polygon size {polygon_size} generating video")
-                                        auto.set_init_voronoi(polygon_size, sample, seed)
-                                        auto.make_video(time_steps = 200, start_steps=100, step=4, config = auto.state, video_path=video_path)
+                                        seeds = [seed]
+                                        auto.make_video(seeds=seeds, polygon_size=polygon_size, init_polygon_index=sample, sim_time=400, step_size=4, phase=ph)
                                     break
                         except:
                             continue
@@ -242,7 +229,7 @@ def plot_phase_proportion(folder_name, mode="unif_random_voronoi", array_size=10
                 plt.savefig(f"{mode}/{folder_name}/prop_plots/{g_mju}_{g_sig}.png")
                 plt.close()
          
-def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi"):
+def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi", array_size=100):
     D = {"order": {"x": [], "y": []}, "chaos": {"x": [], "y": []}, "max": {"x": [], "y": []},  "no phase": {"x": [], "y": []}, "trans": {"x": [], "y": []}, "TBA": {"x": [], "y": []}}
 
 
@@ -252,7 +239,7 @@ def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi
         for g_sig in np.arange(0.001,sig_lim, 0.001):
             g_sig = np.round(g_sig, 4)
             try:
-                phase = get_global_phase(folder_name, g_mju, g_sig, mode, array_size=100)
+                phase = get_global_phase(folder_name, g_mju, g_sig, mode, array_size=array_size)
                 print(g_mju, g_sig, phase)
                 D[phase]["x"].append(g_sig)
                 D[phase]["y"].append(g_mju)
@@ -313,6 +300,45 @@ def rename_and_move_videos(folder_name):
             
             shutil.copyfile(src, new_file_path) 
 
+
+def get_one_huge_data_file(folder_name, array_size=100):
+    D = {array_size: []}
+    folder_path = f"{folder_name}/data/"
+    for file in sorted(os.listdir(folder_path)):
+        g_mju, g_sig = file[:-7].split("_")
+        data = pickle.load(open(folder_path+file, "rb"))
+
+        g_mju = np.round(float(g_mju), 4)
+        g_sig = np.round(float(g_sig), 4)
+
+        params = data["params"]
+
+        for key in params.keys():
+            try:
+                params[key] = params[key].tolist()
+            except:
+                continue
+
+        phases = set()
+        for random_size in np.arange(10, 90, 1):
+            try:
+                phase = data[str(array_size)][str(random_size)]["phase"]
+                phases = phases.union(set(phase))
+            except:
+                continue
+    
+
+        d = {"x": g_sig, "y": g_mju, "params": params, "phase": classify(phases)}
+        d["data"] = data[str(array_size)]
+        D[array_size].append(d)
+
+    json_path = f"{folder_name}/all_data.json"
+    pickle_path = f"{folder_name}/all_data.pickle"
+    json.dump(D, open(json_path, "w"))
+    pickle.dump(D, open(pickle_path, "wb"))
+
+   
+
 def get_graph_file(folder_name, mode="unif_random_voronoi"):
     D = []
     gif_prefix=f"https://raw.githubusercontent.com/barahudcova/cont_lenia/refs/heads/main/{folder_name}/git_videos/"
@@ -367,89 +393,49 @@ def profile_time(f, top_time):
     print(s.getvalue())
 
 #============================== PARAMETERS ================================
-device = 'cpu' # Device on which to run the automaton
+device = 'cuda:2' # Device on which to run the automaton
 W,H = 100,100 # Size of the automaton
 array_size = W
 dt = 0.1 # Time step size
 num_channels= 1
 mode = "unif_random_voronoi"
 
-#k_mju = [0.3, 0.7]
-#k_sig = [0.1, 0.1]
-#beta = [1,1]
 
+
+beta = [1, 0.5, 0.25]
 k_mju = [0.5]
 k_sig = [0.15]
-beta = [1]
 
-#k_mju = [0.3, 0.7]
-#beta = [1, 1]
-#k_sig = [0.1, 0.1]
-
-#beta = [1, 1, 1]
-#k_mju = [0.2, 0.5, 0.8]
-#k_sig = [0.08, 0.08, 0.08] 
-
-g_mju = 0.15
-g_sig = 0.015
-
-
-folder_name = "_".join([str(s) for s in k_mju])+"_"+"_".join([str(s) for s in k_sig])
-print(folder_name)
 
 params = {
-    'k_size': 27, 
+    'k_size': 57, 
     'mu': jnp.array([[[0.15]]]), 
     'sigma': jnp.array([[[0.015]]]), 
     'beta': jnp.array([[[beta]]]), 
     'mu_k': jnp.array([[[k_mju]]]), 
     'sigma_k': jnp.array([[[k_sig]]]), 
-    'weights': jnp.array([[[1.0]]])
+    'weights': jnp.array([[[1.0]]]),
+    'func_k': 'quad4',
 }
 
 
+
+lenia = MultiLeniaJAX((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+folder_name = lenia.kernel_folder
+kernel_path = lenia.kernel_path
+
+
 #================================================================================
 
-print_graph(folder_name)
+print_graph(folder_name, array_size=200)
 
-"""
-polygon_size = 60
-sample = 28
-seed = 549096975
+global_phase = "max"
+local_phase = "max"
 
-NW, NH = 500, 500
+g_mju_range = np.arange(0.1, 0.5, 0.005)
+g_sig_range = np.arange(0.001,0.1, 0.001)
 
-auto.set_init_voronoi(polygon_size=polygon_size, sample=sample, seed=seed)
-config = auto.state.cpu()[0,:,:,:]
-config = load_pattern(config, [NW, NH]).reshape(1,1,NH, NW)
-array = torch.tensor(config).float().to(device)
 
-auto.make_video(time_steps = 2000, start_steps = 0, step=1, config = auto.state, video_path=f"{mode}/{folder_name}/interesting/{g_mju}_{g_sig}_{polygon_size}_{sample}_{seed}_{W}.gif")
+#get_one_huge_data_file(kernel_path)
 
-auto2 = BatchLeniaMC((1,NH,NW), dt, params=params, num_channels=num_channels, device=device)
-auto2.to(device)
-auto2.kernel[0]=auto.kernel[0]
-auto2.kernel_eff = auto.kernel.reshape([auto.batch*auto.C*auto.C,1,auto.k_size,auto.k_size]) 
-auto2.state = array
-auto2.make_video(time_steps = 2000, start_steps = 0, step=1, config = auto2.state, video_path=f"{mode}/{folder_name}/interesting/{g_mju}_{g_sig}_{polygon_size}_{sample}_{seed}_{NW}.gif") """
-#================================================================================
-
-""" g_mju = 0.15
-g_sig = 0.015
-
-folder_name = "0.5_0.15"
-polygon_size = 50
-
-path = f'{mode}/{folder_name}/data/{g_mju}_{g_sig}.pickle'
-with open(path, "rb") as f:
-    data = pickle.load(f)[str(array_size)]
-
-print(data[str(polygon_size)]["phase"])
-
-for index in range(256):
-    seed = data[str(polygon_size)]["seed"][index]
-    phase = data[str(polygon_size)]["phase"][index]
-    seeds = [seed]
-    if phase=="max":
-        auto = MultiLeniaJAX((W, H), batch=1, num_channels=1, dt=0.1, params=params)
-        auto.make_video(seeds=seeds, polygon_size=polygon_size, init_polygon_index=index, sim_time=1000, step_size=4, phase=phase) """
+#get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, mode="unif_random_voronoi", array_size=100)

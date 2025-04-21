@@ -117,15 +117,18 @@ def get_approx_trans(auto, std, window_size):
 
 
 
-def get_approx_data(auto, polygon_size_range, array_size, samples, folder_name, params):
+def get_approx_data(auto, polygon_size_range, array_size, samples, params):
     batch_size = auto.batch
+    folder_name = auto.kernel_path
+
+    print("folder name: ", folder_name)
 
     g_mju = np.round(params["mu"].item(), 4)
     g_sig = np.round(params["sigma"].item(), 4)
 
     print("rounded: ", g_mju, g_sig)
 
-    path = f"unif_random_voronoi/{folder_name}/data/{g_mju}_{g_sig}.pickle"
+    path = f"{folder_name}/data/{g_mju}_{g_sig}.pickle"
 
     std = 3
     window_size = 200
@@ -174,7 +177,7 @@ def get_approx_data(auto, polygon_size_range, array_size, samples, folder_name, 
             print("batch index: ", batch_index)
 
             auto.set_init_voronoi_batch(polygon_size, batch_index)
-            auto.plot_voronoi_batch()
+            #auto.plot_voronoi_batch()
             seeds = auto.seeds
 
             phases = get_approx_trans(auto, std, window_size)
@@ -204,60 +207,71 @@ def get_approx_data(auto, polygon_size_range, array_size, samples, folder_name, 
             
 
 #============================== PARAMETERS ================================
-W,H = 100,100 # Size of the automaton
+W,H = 200,200 # Size of the automaton
 array_size = W
 dt = 0.1 # Time step size
 num_channels= 1
+device = 3    #index of device available
 
-samples = 64
-beta = [1]
-k_mju = [0.5]
-k_sig = [0.15]
+print(jax.devices())
 
+jax.config.update("jax_default_device", jax.devices()[device])
 
-kernel_folder = "_".join([str(s) for s in k_mju])+"_"+"_".join([str(s) for s in k_sig])
-
-print(kernel_folder)
-
-if not os.path.exists(f"unif_random_voronoi/{kernel_folder}"):
-    os.mkdir(f"unif_random_voronoi/{kernel_folder}")
-    os.mkdir(f"unif_random_voronoi/{kernel_folder}/data")
-
+samples = 64  # total number of data samples per polygon size
+B = 64  # batch size
 
 polygon_size_range = [10,20,30,40,50,60,70,80,90]
-#polygon_size_range = [50]
 #======================================================================
 
 
+beta = [1, 0.75, 0.25, 0.75]
+k_mju = [0.5]
+k_sig = [0.15]
+
 params = {
-    'k_size': 27, 
-    'mu': jnp.array([[[0.15]]]), 
-    'sigma': jnp.array([[[0.015]]]), 
+    'k_size': 57, 
+    'mu': jnp.array([[[0.5]]]), 
+    'sigma': jnp.array([[[0.15]]]), 
     'beta': jnp.array([[[beta]]]), 
     'mu_k': jnp.array([[[k_mju]]]), 
     'sigma_k': jnp.array([[[k_sig]]]), 
-    'weights': jnp.array([[[1.0]]])
-}
+    'weights': jnp.array([[[1.0]]]),
+    'func_k': 'quad4',
+} 
 
 
-#params["mu"] = jnp.put(params["mu"], jnp.array([0,0,0]), 0.5, inplace=False)
-#print(params["mu"])
+""" beta = [1]
+k_mju = [0.5]
+k_sig = [0.15]
 
-B = 64
+params = {
+    'k_size': 27, 
+    'mu': jnp.array([[[0.5]]]), 
+    'sigma': jnp.array([[[0.15]]]), 
+    'beta': jnp.array([[[beta]]]), 
+    'mu_k': jnp.array([[[k_mju]]]), 
+    'sigma_k': jnp.array([[[k_sig]]]), 
+    'weights': jnp.array([[[1.0]]]),
+    'func_k': 'exp_mu_sig',
+} 
+ """
+
 
 
 #======================================================================
 # Initializing automaton with batch size = 1 to get the exact same kernel every time for reproducibility
 
-auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params)
-print(auto.batch)
+#auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params)
+#print(auto.batch)
 
 #======================================================================
 
 start = time.time()
 
+auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params, device=device)
+auto.plot_kernel()
 
-for g_mju in np.arange(0.1, 0.2, 0.005):
+for g_mju in np.arange(0.3, 0.5, 0.005):
     g_mju = np.round(g_mju, 4)
     for g_sig in np.arange(0.001,0.1, 0.001):
         g_sig = np.round(g_sig, 4)
@@ -267,8 +281,27 @@ for g_mju in np.arange(0.1, 0.2, 0.005):
 
         print(params)
 
-        auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params)
-        ph_tup, ph = get_approx_data(auto, polygon_size_range, array_size, samples, kernel_folder, params) 
+        auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params, device=device)
+        ph_tup, ph = get_approx_data(auto, polygon_size_range, array_size, samples, params) 
 
-print(time.time()-start) 
+        # in case finer polygon sizes are wanted:
+        if not "max" in ph:
+            if "trans" in ph:
+                r_min = min([k for (k, v) in ph_tup if v=="trans"])
+                r_max = min(r_min+10, max(polygon_size_range))
+                new_polygon_size_range = np.arange(r_min, r_max, 1)
+                print(new_polygon_size_range)
+                ph_tup, ph = get_approx_data(auto, new_polygon_size_range, array_size, samples, params)
+                print(ph)
+            elif ("order" in ph) and ("chaos" in ph):
+                r_min = max([k for (k, v) in ph_tup if v == "order"])
+                r_max = min(r_min+10, max(polygon_size_range))
+                new_polygon_size_range = np.arange(r_min, r_max, 1)
+                print(new_polygon_size_range)
+                ph_tup, ph = get_approx_data(auto, new_polygon_size_range, array_size, samples, params)
+                print(ph) 
+
+                
+
+print(time.time()-start)
 

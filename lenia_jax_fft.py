@@ -29,6 +29,7 @@ class LeniaParams:
             self.sigma_k = jnp.array(param_dict['sigma_k'])
             self.weights = jnp.array(param_dict['weights'])
             self.k_size = param_dict.get('k_size', k_size)
+            self.func_k = param_dict.get('func_k', 'exp_mu_sig')
             self.batch_size = self.weights.shape[0]
         else:
             # Initialize with default values
@@ -45,7 +46,8 @@ class LeniaParams:
                 'beta': self.beta,
                 'mu_k': self.mu_k,
                 'sigma_k': self.sigma_k,
-                'weights': self.weights
+                'weights': self.weights,
+                'func_k': 'exp_mu_sig'
             }
         
 
@@ -91,7 +93,7 @@ class MultiLeniaJAX(Automaton):
     Multi-channel Lenia automaton implemented in JAX.
     A multi-colored GoL-inspired continuous automaton. Originally introduced by Bert Chan.
     """
-    def __init__(self, size, batch=1, dt=0.1, num_channels=3, params=None, param_path=None, device='cpu'):
+    def __init__(self, size, batch=1, dt=0.1, num_channels=3, params=None, param_path=None, device=0):
         """
         Initializes automaton.  
 
@@ -104,6 +106,7 @@ class MultiLeniaJAX(Automaton):
             param_path: str, path to folder containing saved parameters
             device: str, device (not used in JAX implementation)
         """
+        jax.config.update("jax_default_device", jax.devices()[device])
         super().__init__(size=size)
 
         self.batch = batch
@@ -117,20 +120,46 @@ class MultiLeniaJAX(Automaton):
         else:
             self.params = params
 
-        kernel_folder = "_".join([str(s) for s in self.params["mu_k"][0,0,0]])+"_"+"_".join([str(s) for s in self.params["sigma_k"][0,0,0]])
+        self.k_size = self.params['k_size']
+
+        if self.params['func_k'] in ['exp', 'quad4']:
+            kernel_folder = self.params['func_k']+"_"+"_".join([str(s) for s in self.params["beta"][0,0,0]])+"_"+str(self.k_size)
+        else:
+            kernel_folder = "_".join([str(s) for s in self.params["mu_k"][0,0,0]])+"_"+"_".join([str(s) for s in self.params["sigma_k"][0,0,0]])+"_"+str(self.k_size)
+        
+        self.kernel_folder = kernel_folder
         self.kernel_path = "unif_random_voronoi/" + kernel_folder
+
+        if not os.path.exists(self.kernel_path):
+            os.mkdir(self.kernel_path)
+            os.mkdir(f"{self.kernel_path}/data")
+
+
         print(self.kernel_path)
 
         self.g_mu = np.round(params["mu"].item(), 4)
         self.g_sig = np.round(params["sigma"].item(), 4)
 
+        self.beta = params["beta"][0][0][0]
+
+        self.mu_k = self.params.mu_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
+        self.sigma_k = self.params.sigma_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
+
         self.data_path = f"unif_random_voronoi/{kernel_folder}/data/{self.g_mu}_{self.g_sig}.pickle"
 
-        self.k_size = self.params['k_size']
 
         # Create a random initial state
         key = jax.random.PRNGKey(0)
         self.state = jax.random.uniform(key, shape=(self.batch, self.C, self.h, self.w))
+
+        #initialize kernel func:
+        if self.params['func_k'] == 'exp_mu_sig':
+            self.func_k = lambda r: jnp.exp(-((r - self.mu_k) / self.sigma_k)**2 / 2)
+        elif self.params['func_k'] == 'exp':
+            self.func_k = lambda r: np.exp( 4 - 1 / (r * (1-r)) )
+        elif self.params['func_k'] == 'quad4':
+            self.func_k = lambda r: (4 * r * (1-r))**4
+
 
         # Load polygons for initialization
         try:
@@ -251,6 +280,7 @@ class MultiLeniaJAX(Automaton):
         
         # Convert to JAX array
         self.state = jnp.array(states_np)
+        print(self.state.device)
 
     def plot_voronoi_batch(self, figsize=(15, 10), save_path="inits.png"):
         cmap = "gray"
@@ -316,7 +346,7 @@ class MultiLeniaJAX(Automaton):
         return fig, axes
 
 
-    def kernel_slice(self, r):
+    def kernel_slice(self, r, beta=None):
         """
         Given a distance matrix r, computes the kernel of the automaton.
         
@@ -333,18 +363,14 @@ class MultiLeniaJAX(Automaton):
         num_cores = self.params.mu_k.shape[3]
         
         # Expand r to match batched parameters
-        r = jnp.broadcast_to(r, (self.batch, self.C, self.C, num_cores, self.k_size, self.k_size))
+        r = jnp.broadcast_to(r, (self.batch, self.C, self.C, num_cores, self.k_size, self.k_size))        
+
+        if beta is None: # implementation with prespecified cores
+            beta = self.params.beta[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
+            
         
-        # Reshape parameters for broadcasting
-        mu_k = self.params.mu_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
-        sigma_k = self.params.sigma_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
-        beta = self.params.beta[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
-        
-        # Compute kernel
-        K = jnp.exp(-((r - mu_k) / sigma_k)**2 / 2)  # (B,C,C,#cores,k_size,k_size)
-        
-        # Sum over cores with respective heights
-        K = jnp.sum(beta * K, axis=3)  # (B,C,C,k_size,k_size)
+        K = self.func_k(r)  # (B,C,C,#cores,k_size,k_size)
+        K = jnp.sum(beta*K, axis=3)
         
         return K
 
@@ -361,9 +387,20 @@ class MultiLeniaJAX(Automaton):
         
         # Compute radius values
         r = jnp.sqrt(x**2 + y**2)
+        print(r.shape)
+        b = len(self.beta)
+        beta = None
+
+        if self.params['func_k'] in ['exp', 'quad4']: #making this compatible with Bert's implementation with cores being duplicated according to beta
+            r = jnp.where(r > 1, 0, r)
+            if b>1:
+                Br = b*r
+                bs = np.asarray([float(f) for f in self.beta])
+                beta = bs[np.minimum(np.floor(Br).astype(int), b-1)]
+                r = Br%1
         
         # Compute kernel
-        K = self.kernel_slice(r)  # (B,C,C,k_size,k_size)
+        K = self.kernel_slice(r, beta)  # (B,C,C,k_size,k_size)
         
         # Normalize kernel
         summed = jnp.sum(K, axis=(-1, -2), keepdims=True)  # (B,C,C,1,1)
@@ -371,6 +408,21 @@ class MultiLeniaJAX(Automaton):
         K = K / summed
         
         return K
+    
+    def plot_kernel(self, save_path=None):
+        if not save_path:
+            save_path = f"{self.kernel_path}/kernel.png"
+        if self.C == 1:
+            kernel = self.kernel[0, 0, :]
+            print(kernel.shape)
+            knl = load_pattern(kernel, [self.k_size+1, self.k_size+1])
+            plt.imshow(1-(knl)[0,:,:], cmap="binary")
+            plt.grid(axis='x', color='0.95')
+            plt.axis('off')
+            plt.savefig(save_path, bbox_inches='tight')
+            plt.close()
+        else:
+            print("too many channels to plot")
 
     def kernel_to_fft(self, K):
         """
@@ -598,23 +650,41 @@ class MultiLeniaJAX(Automaton):
 
 
 
-# Set up parameters
+samples = 64  # total number of data samples per polygon size
+beta = [1, 0.5]
+k_mju = [0.5]
+k_sig = [0.15]
+
+
+B = 64  # batch size
+
+polygon_size_range = [10,20,30,40,50,60,70,80,90]
+#======================================================================
+
+""" 
 params = {
-    'k_size': 27, 
-    'mu': jnp.array([[[0.15]]]), 
-    'sigma': jnp.array([[[0.015]]]), 
-    'beta': jnp.array([[[[1.0]]]]), 
-    'mu_k': jnp.array([[[[0.5]]]]), 
-    'sigma_k': jnp.array([[[[0.15]]]]), 
-    'weights': jnp.array([[[1.0]]])
-}
+    'k_size': 37, 
+    'mu': jnp.array([[[0.2]]]), 
+    'sigma': jnp.array([[[0.022]]]), 
+    'beta': jnp.array([[[beta]]]), 
+    'mu_k': jnp.array([[[k_mju]]]), 
+    'sigma_k': jnp.array([[[k_sig]]]), 
+    'weights': jnp.array([[[1.0]]]),
+    'func_k': 'quad4',
+} 
+
+
 
 # Create Lenia instance
+lenia = MultiLeniaJAX((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+lenia.plot_kernel()
 
-#polygon_size = 25
-#lenia = MultiLeniaJAX((100, 100), batch=8, num_channels=1, dt=0.1, params=params)
-#lenia.set_init_voronoi_batch(polygon_size=polygon_size)
+polygon_size = 35
+lenia.set_init_voronoi_batch(polygon_size=polygon_size)
 #lenia.plot_voronoi_batch(figsize=(15, 10), save_path="inits.png")
 
-#lenia.make_video(seeds=seeds, polygon_size=polygon_size, sim_time=200, step_size=2)
 
+seeds=[42]
+lenia.make_video(seeds=seeds, polygon_size=polygon_size, sim_time=200, step_size=2)
+
+ """
