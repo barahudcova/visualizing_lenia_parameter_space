@@ -135,7 +135,7 @@ class MultiLeniaJAX(Automaton):
             os.mkdir(f"{self.kernel_path}/data")
 
 
-        print(self.kernel_path)
+        #print(self.kernel_path)
 
         self.g_mu = np.round(params["mu"].item(), 4)
         self.g_sig = np.round(params["sigma"].item(), 4)
@@ -414,7 +414,7 @@ class MultiLeniaJAX(Automaton):
             save_path = f"{self.kernel_path}/kernel.png"
         if self.C == 1:
             kernel = self.kernel[0, 0, :]
-            print(kernel.shape)
+            #print(kernel.shape)
             knl = load_pattern(kernel, [self.k_size+1, self.k_size+1])
             plt.imshow(1-(knl)[0,:,:], cmap="binary")
             plt.grid(axis='x', color='0.95')
@@ -630,9 +630,10 @@ class MultiLeniaJAX(Automaton):
         # Save final state
         self.draw()
 
+        video_dir = f"{self.kernel_path}/videos"
+        os.makedirs(video_dir, exist_ok=True)
+
         if not save_path:
-            video_dir = f"{self.kernel_path}/videos"
-            os.makedirs(video_dir, exist_ok=True)
             if not phase:
                 save_path = f"{video_dir}/{polygon_size}_{init_polygon_index}_{seeds[0]}_jax.gif"
             else:
@@ -661,8 +662,8 @@ B = 64  # batch size
 polygon_size_range = [10,20,30,40,50,60,70,80,90]
 #======================================================================
 
-""" 
-params = {
+
+""" params = {
     'k_size': 37, 
     'mu': jnp.array([[[0.2]]]), 
     'sigma': jnp.array([[[0.022]]]), 
@@ -686,5 +687,4 @@ lenia.set_init_voronoi_batch(polygon_size=polygon_size)
 
 seeds=[42]
 lenia.make_video(seeds=seeds, polygon_size=polygon_size, sim_time=200, step_size=2)
-
  """

@@ -211,7 +211,7 @@ W,H = 200,200 # Size of the automaton
 array_size = W
 dt = 0.1 # Time step size
 num_channels= 1
-device = 3    #index of device available
+device = 0    #index of device available
 
 print(jax.devices())
 
@@ -224,7 +224,7 @@ polygon_size_range = [10,20,30,40,50,60,70,80,90]
 #======================================================================
 
 
-beta = [1, 0.75, 0.25, 0.75]
+beta = [1.0, 0.5]
 k_mju = [0.5]
 k_sig = [0.15]
 
@@ -271,7 +271,7 @@ start = time.time()
 auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params, device=device)
 auto.plot_kernel()
 
-for g_mju in np.arange(0.3, 0.5, 0.005):
+for g_mju in np.arange(0.3, 0.33, 0.005):
     g_mju = np.round(g_mju, 4)
     for g_sig in np.arange(0.001,0.1, 0.001):
         g_sig = np.round(g_sig, 4)
@@ -304,4 +304,3 @@ for g_mju in np.arange(0.3, 0.5, 0.005):
                 
 
 print(time.time()-start)
-

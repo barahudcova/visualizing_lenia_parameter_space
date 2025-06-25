@@ -111,9 +111,12 @@ def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_
             g_sig = np.round(g_sig, 4)
             try: 
                 path = f'{mode}/{folder_name}/data/{g_mju}_{g_sig}.pickle'
+                print("path: ", path)
                 gphase = get_global_phase(folder_name, g_mju, g_sig)
                 with open(path, "rb") as f:
                     data = pickle.load(f)[str(array_size)]
+
+                print(gphase)
 
 
                 params = {
@@ -135,21 +138,24 @@ def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_
                 found = False
 
                 if gphase == global_phase:
+                    print("global phase: ", gphase)
                     for polygon_size in polygon_size_range:
-                        try:
-                            for sample, (seed, ph) in enumerate(zip(data[str(polygon_size)]["seed"], data[str(polygon_size)]["phase"])):
-                                if ph == local_phase:
-                                    found = True
-                                    video_path=f"{mode}/{folder_name}/videos/{g_mju}_{g_sig}_{local_phase}_{polygon_size}_{sample}_{seed}.gif"
-                                    if os.path.exists(video_path):
-                                        print(f"gmju: {g_mju}, gsig: {g_sig}, polygon size {polygon_size} video already exists")
-                                    else:
-                                        print(f"gmju: {g_mju}, gsig: {g_sig}, polygon size {polygon_size} generating video")
-                                        seeds = [seed]
-                                        auto.make_video(seeds=seeds, polygon_size=polygon_size, init_polygon_index=sample, sim_time=400, step_size=4, phase=ph)
-                                    break
-                        except:
-                            continue
+                        if not found:
+                            try:
+                                for sample, (seed, ph) in enumerate(zip(data[str(polygon_size)]["seed"], data[str(polygon_size)]["phase"])):
+                                    if ph == local_phase:
+                                        found = True
+                                        video_path=f"{mode}/{folder_name}/videos/{g_mju}_{g_sig}_{local_phase}_{polygon_size}_{sample}_{seed}.gif"
+                                        print("video path: ", video_path)
+                                        if os.path.exists(video_path):
+                                            print(f"gmju: {g_mju}, gsig: {g_sig}, polygon size {polygon_size} video already exists")
+                                        else:
+                                            print(f"gmju: {g_mju}, gsig: {g_sig}, polygon size {polygon_size} generating video")
+                                            seeds = [seed]
+                                            auto.make_video(seeds=seeds, polygon_size=polygon_size, init_polygon_index=sample, sim_time=400, step_size=4, phase=ph, save_path=video_path)
+                                        break
+                            except:
+                                continue
             except:
                 print("error", g_mju, g_sig)
                 continue 
@@ -393,7 +399,6 @@ def profile_time(f, top_time):
     print(s.getvalue())
 
 #============================== PARAMETERS ================================
-device = 'cuda:2' # Device on which to run the automaton
 W,H = 100,100 # Size of the automaton
 array_size = W
 dt = 0.1 # Time step size
@@ -402,10 +407,11 @@ mode = "unif_random_voronoi"
 
 
 
-beta = [1, 0.5, 0.25]
+beta = [1.0, 0.5]
 k_mju = [0.5]
 k_sig = [0.15]
 
+func_k = 'quad4'
 
 params = {
     'k_size': 57, 
@@ -415,12 +421,12 @@ params = {
     'mu_k': jnp.array([[[k_mju]]]), 
     'sigma_k': jnp.array([[[k_sig]]]), 
     'weights': jnp.array([[[1.0]]]),
-    'func_k': 'quad4',
+    'func_k': func_k,
 }
 
 
 
-lenia = MultiLeniaJAX((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+lenia = MultiLeniaJAX((W, H), batch=1, num_channels=1, dt=0.1, params=params)
 folder_name = lenia.kernel_folder
 kernel_path = lenia.kernel_path
 
@@ -438,4 +444,4 @@ g_sig_range = np.arange(0.001,0.1, 0.001)
 
 #get_one_huge_data_file(kernel_path)
 
-#get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, mode="unif_random_voronoi", array_size=100)
+#get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, mode="unif_random_voronoi", array_size=200)

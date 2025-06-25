@@ -4,9 +4,9 @@ import os
 import random
 import pygame
 import imageio.v2 as imageio
-import matplotlib.pyplot as plt
 from utils.voronoi_polygons import load_pattern
-from scipy.fft import fft2, ifft2
+import matplotlib.pyplot as plt
+
 
 class LeniaParams:
     """NumPy version of LeniaParams to store and manage Lenia parameters."""
@@ -24,6 +24,7 @@ class LeniaParams:
             self.sigma_k = np.array(param_dict['sigma_k'])
             self.weights = np.array(param_dict['weights'])
             self.k_size = param_dict.get('k_size', k_size)
+            self.func_k = param_dict.get('func_k', 'exp_mu_sig')
             self.batch_size = self.weights.shape[0]
         else:
             # Initialize with default values
@@ -40,11 +41,13 @@ class LeniaParams:
                 'beta': self.beta,
                 'mu_k': self.mu_k,
                 'sigma_k': self.sigma_k,
-                'weights': self.weights
+                'weights': self.weights,
+                'func_k': 'exp_mu_sig'
             }
     
     def to(self, device):
-        # This is a no-op for NumPy, kept for API compatibility
+        # NumPy doesn't have device placement, so this is a no-op
+        # but kept for API compatibility
         pass
     
     def __getitem__(self, key):
@@ -68,8 +71,8 @@ class Automaton:
         
     def draw(self):
         if self._worldmap is not None:
-            # Convert from NumPy array
-            array = np.asarray(self._worldmap.transpose(1, 2, 0) * 255).astype(np.uint8)
+            # Convert array to proper format for pygame
+            array = (self._worldmap.transpose(1, 2, 0) * 255).astype(np.uint8)
             
             # Create pygame surface from the array
             self.worldsurface = pygame.surfarray.make_surface(array)
@@ -83,7 +86,7 @@ class MultiLeniaNumPy(Automaton):
     Multi-channel Lenia automaton implemented in NumPy.
     A multi-colored GoL-inspired continuous automaton. Originally introduced by Bert Chan.
     """
-    def __init__(self, size, batch=1, dt=0.1, num_channels=3, params=None, param_path=None, device='cpu'):
+    def __init__(self, size, batch=1, dt=0.1, num_channels=3, params=None, param_path=None, device=0):
         """
         Initializes automaton.  
 
@@ -109,19 +112,41 @@ class MultiLeniaNumPy(Automaton):
         else:
             self.params = params
 
-        kernel_folder = "_".join([str(s) for s in self.params["mu_k"][0,0,0]])+"_"+"_".join([str(s) for s in self.params["sigma_k"][0,0,0]])
+        self.k_size = self.params['k_size']
+
+        if self.params['func_k'] in ['exp', 'quad4']:
+            kernel_folder = self.params['func_k']+"_"+"_".join([str(s) for s in self.params["beta"][0,0,0]])+"_"+str(self.k_size)
+        else:
+            kernel_folder = "_".join([str(s) for s in self.params["mu_k"][0,0,0]])+"_"+"_".join([str(s) for s in self.params["sigma_k"][0,0,0]])+"_"+str(self.k_size)
+        
+        self.kernel_folder = kernel_folder
         self.kernel_path = "unif_random_voronoi/" + kernel_folder
-        print(self.kernel_path)
+
+        if not os.path.exists(self.kernel_path):
+            os.makedirs(self.kernel_path, exist_ok=True)
+            os.makedirs(f"{self.kernel_path}/data", exist_ok=True)
 
         self.g_mu = np.round(params["mu"].item(), 4)
         self.g_sig = np.round(params["sigma"].item(), 4)
 
+        self.beta = params["beta"][0][0][0]
+
+        self.mu_k = self.params.mu_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
+        self.sigma_k = self.params.sigma_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
+
         self.data_path = f"unif_random_voronoi/{kernel_folder}/data/{self.g_mu}_{self.g_sig}.pickle"
 
-        self.k_size = self.params['k_size']
-
         # Create a random initial state
-        self.state = np.random.uniform(size=(self.batch, self.C, self.h, self.w))
+        np.random.seed(0)
+        self.state = np.random.uniform(0, 1, size=(self.batch, self.C, self.h, self.w))
+
+        # Initialize kernel func:
+        if self.params['func_k'] == 'exp_mu_sig':
+            self.func_k = lambda r: np.exp(-((r - self.mu_k) / self.sigma_k)**2 / 2)
+        elif self.params['func_k'] == 'exp':
+            self.func_k = lambda r: np.exp(4 - 1 / (r * (1-r)))
+        elif self.params['func_k'] == 'quad4':
+            self.func_k = lambda r: (4 * r * (1-r))**4
 
         # Load polygons for initialization
         try:
@@ -161,7 +186,8 @@ class MultiLeniaNumPy(Automaton):
         self.to_save_param_path = 'SavedParameters/Lenia'
 
     def to(self, device):
-        # This is a no-op for NumPy, kept for API compatibility
+        # NumPy doesn't have device placement, so this is a no-op
+        # but kept for API compatibility
         pass
     
     def update_params(self, params, k_size_override=None):
@@ -220,7 +246,6 @@ class MultiLeniaNumPy(Automaton):
             seeds = [np.random.randint(2**32) for _ in range(self.batch)]
 
         self.seeds = seeds
-        print(seeds)
 
         # Create empty numpy array for states
         states_np = np.empty((self.batch, self.C, self.h, self.w))
@@ -234,21 +259,22 @@ class MultiLeniaNumPy(Automaton):
             
             # Generate random state and apply mask
             rand_np = np.random.rand(1, self.C, self.h, self.w)
-            pattern = np.asarray(rand_np * mask)
+            pattern = rand_np * mask
             states_np[i] = pattern[0]
         
-        # Update state
+        # Convert to NumPy array (already is one)
         self.state = states_np
 
     def plot_voronoi_batch(self, figsize=(15, 10), save_path="inits.png"):
+        cmap = "gray"
         """
         Creates and saves a matplotlib figure with all states from a Lenia object.
         
         Args:
             figsize: Tuple (width, height) for the figure size
             save_path: String path where to save the plot
+            cmap: Colormap to use for the plots
         """
-        cmap = "gray"
         # Get the states from the Lenia object
         states = self.state  # Shape: (batch, channels, height, width)
         batch_size, channels, height, width = states.shape
@@ -285,7 +311,7 @@ class MultiLeniaNumPy(Automaton):
         # Hide any unused subplots
         for i in range(batch_size, len(axes)):
             axes[i].axis('off')
-        
+            
         # Adjust spacing
         plt.tight_layout()
         
@@ -296,7 +322,7 @@ class MultiLeniaNumPy(Automaton):
         
         return fig, axes
 
-    def kernel_slice(self, r):
+    def kernel_slice(self, r, beta=None):
         """
         Given a distance matrix r, computes the kernel of the automaton.
         
@@ -313,18 +339,13 @@ class MultiLeniaNumPy(Automaton):
         num_cores = self.params.mu_k.shape[3]
         
         # Expand r to match batched parameters
-        r = np.broadcast_to(r, (self.batch, self.C, self.C, num_cores, self.k_size, self.k_size))
-        
-        # Reshape parameters for broadcasting
-        mu_k = self.params.mu_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
-        sigma_k = self.params.sigma_k[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
-        beta = self.params.beta[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
-        
-        # Compute kernel
-        K = np.exp(-((r - mu_k) / sigma_k)**2 / 2)  # (B,C,C,#cores,k_size,k_size)
-        
-        # Sum over cores with respective heights
-        K = np.sum(beta * K, axis=3)  # (B,C,C,k_size,k_size)
+        r = np.broadcast_to(r, (self.batch, self.C, self.C, num_cores, self.k_size, self.k_size))        
+
+        if beta is None: # implementation with prespecified cores
+            beta = self.params.beta[:, :, :, :, None, None]  # (B,C,C,#cores,1,1)
+            
+        K = self.func_k(r)  # (B,C,C,#cores,k_size,k_size)
+        K = np.sum(beta*K, axis=3)
         
         return K
 
@@ -341,9 +362,20 @@ class MultiLeniaNumPy(Automaton):
         
         # Compute radius values
         r = np.sqrt(x**2 + y**2)
+        print(r.shape)
+        b = len(self.beta)
+        beta = None
+
+        if self.params['func_k'] in ['exp', 'quad4']: #making this compatible with Bert's implementation with cores being duplicated according to beta
+            r = np.where(r > 1, 0, r)
+            if b>1:
+                Br = b*r
+                bs = np.asarray([float(f) for f in self.beta])
+                beta = bs[np.minimum(np.floor(Br).astype(int), b-1)]
+                r = Br%1
         
         # Compute kernel
-        K = self.kernel_slice(r)  # (B,C,C,k_size,k_size)
+        K = self.kernel_slice(r, beta)  # (B,C,C,k_size,k_size)
         
         # Normalize kernel
         summed = np.sum(K, axis=(-1, -2), keepdims=True)  # (B,C,C,1,1)
@@ -351,6 +383,20 @@ class MultiLeniaNumPy(Automaton):
         K = K / summed
         
         return K
+    
+    def plot_kernel(self, save_path=None):
+        if not save_path:
+            save_path = f"{self.kernel_path}/kernel.png"
+        if self.C == 1:
+            kernel = self.kernel[0, 0, :]
+            knl = load_pattern(kernel, [self.k_size+1, self.k_size+1])
+            plt.imshow(1-(knl)[0,:,:], cmap="binary")
+            plt.grid(axis='x', color='0.95')
+            plt.axis('off')
+            plt.savefig(save_path, bbox_inches='tight')
+            plt.close()
+        else:
+            print("too many channels to plot")
 
     def kernel_to_fft(self, K):
         """
@@ -376,7 +422,7 @@ class MultiLeniaNumPy(Automaton):
         padded_K = np.roll(padded_K, [-self.h // 2, -self.w // 2], axis=(-2, -1))
         
         # Compute FFT
-        return fft2(padded_K)
+        return np.fft.fft2(padded_K)
 
     def growth(self, u):
         """
@@ -410,7 +456,7 @@ class MultiLeniaNumPy(Automaton):
             (B,C,C,h,w) array of convolution results
         """
         # Compute FFT of state
-        fft_state = fft2(state)  # (B,C,h,w)
+        fft_state = np.fft.fft2(state)  # (B,C,h,w)
         
         # Reshape for broadcasting with kernel
         fft_state = fft_state[:, :, None, :, :]  # (B,C,1,h,w)
@@ -419,16 +465,22 @@ class MultiLeniaNumPy(Automaton):
         convolved = fft_state * self.fft_kernel  # (B,C,C,h,w)
         
         # Inverse FFT
-        result = ifft2(convolved)  # (B,C,C,h,w)
+        result = np.fft.ifft2(convolved)  # (B,C,C,h,w)
         
         return np.real(result)
 
-    def step(self):
+    def _step(self, state):
         """
-        Steps the automaton state by one iteration.
+        Core step function.
+        
+        Args:
+            state: (B,C,h,w) array, the current state
+            
+        Returns:
+            (B,C,h,w) array, the updated state
         """
         # Compute convolutions
-        convs = self.get_fftconv(self.state)  # (B,C,C,h,w)
+        convs = self.get_fftconv(state)  # (B,C,C,h,w)
         
         # Compute growth
         growths = self.growth(convs)  # (B,C,C,h,w)
@@ -441,7 +493,15 @@ class MultiLeniaNumPy(Automaton):
         dx = np.sum(growths * weights, axis=1)  # (B,C,h,w)
         
         # Update state
-        self.state = np.clip(self.state + self.dt * dx, 0, 1)  # (B,C,h,w)
+        new_state = np.clip(state + self.dt * dx, 0, 1)  # (B,C,h,w)
+        
+        return new_state  # (B,C,h,w)
+
+    def step(self):
+        """
+        Steps the automaton state by one iteration.
+        """
+        self.state = self._step(self.state)
 
     def mass(self):
         """
@@ -453,15 +513,6 @@ class MultiLeniaNumPy(Automaton):
         return np.mean(self.state, axis=(-1, -2))  # (B,C)
     
     def get_batch_mass_center(self, array):
-        """
-        Calculate the center of mass for each batch and channel.
-        
-        Args:
-            array: (B,C,H,W) array, the current state
-            
-        Returns:
-            tuple of (2, B*C) array of center coordinates and (B*C) array of masses
-        """
         B, C, H, W = array.shape  # array shape: (B,C,H,W)
         
         # Reshape array to (H*W, 1, B*C)
@@ -478,7 +529,11 @@ class MultiLeniaNumPy(Automaton):
         mask = (total_mass != 0)
         
         # Normalize by total mass where total mass is not zero
-        sum_mass[:, mask] = sum_mass[:, mask] / total_mass[mask]
+        sum_mass = np.where(
+            mask.reshape(1, -1),  # Reshape mask to match sum_mass dimensions
+            sum_mass / np.where(mask, total_mass, 1.0),  # Divide by mass where mask is True
+            sum_mass  # Keep original values where mask is False
+        )
     
         return sum_mass, total_mass
 
@@ -514,10 +569,6 @@ class MultiLeniaNumPy(Automaton):
         Args:
             seeds: list of ints, random seeds for initialization
             polygon_size: int, size of polygons
-            init_polygon_index: int, starting index for polygons
-            sim_time: int, number of simulation steps
-            step_size: int, interval between saved frames
-            phase: str, optional phase identifier for filename
             save_path: str, path to save the video
         """
         if seeds is None:
@@ -537,7 +588,7 @@ class MultiLeniaNumPy(Automaton):
         for t in range(sim_time):
             self.step()
     
-            if t % step_size == 0:  # Save every nth frame to reduce file count
+            if t % step_size == 0:  # Save every step_size frames to reduce file count
                 self.draw()
                 pygame.image.save(self.worldsurface, f"{frames_dir}/frame_{frame_count:04d}.png")
                 frame_count += 1
@@ -549,9 +600,10 @@ class MultiLeniaNumPy(Automaton):
         # Save final state
         self.draw()
 
+        video_dir = f"{self.kernel_path}/videos"
+        os.makedirs(video_dir, exist_ok=True)
+
         if not save_path:
-            video_dir = f"{self.kernel_path}/videos"
-            os.makedirs(video_dir, exist_ok=True)
             if not phase:
                 save_path = f"{video_dir}/{polygon_size}_{init_polygon_index}_{seeds[0]}_numpy.gif"
             else:
@@ -566,19 +618,35 @@ class MultiLeniaNumPy(Automaton):
 
 #---------------------------------EXAMPLE---------------------------------
 
-# Set up parameters
+# Example usage (commented out)
+"""
+samples = 64  # total number of data samples per polygon size
+beta = [1, 0.5]
+k_mju = [0.5]
+k_sig = [0.15]
+
+B = 64  # batch size
+
+polygon_size_range = [10,20,30,40,50,60,70,80,90]
+
 params = {
-    'k_size': 27, 
-    'mu': np.array([[[0.15]]]), 
-    'sigma': np.array([[[0.015]]]), 
-    'beta': np.array([[[[1.0]]]]), 
-    'mu_k': np.array([[[[0.5]]]]), 
-    'sigma_k': np.array([[[[0.15]]]]), 
-    'weights': np.array([[[1.0]]])
-}
+    'k_size': 37, 
+    'mu': np.array([[[0.2]]]), 
+    'sigma': np.array([[[0.022]]]), 
+    'beta': np.array([[[beta]]]), 
+    'mu_k': np.array([[[k_mju]]]), 
+    'sigma_k': np.array([[[k_sig]]]), 
+    'weights': np.array([[[1.0]]]),
+    'func_k': 'quad4',
+} 
 
 # Create Lenia instance
-polygon_size = 25
-lenia = MultiLeniaNumPy((100, 100), batch=32, num_channels=1, dt=0.1, params=params)
+lenia = MultiLeniaNumPy((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+lenia.plot_kernel()
 
-#lenia.make_video(polygon_size=polygon_size, sim_time=200, step_size=2)
+polygon_size = 35
+lenia.set_init_voronoi_batch(polygon_size=polygon_size)
+
+seeds=[42]
+lenia.make_video(seeds=seeds, polygon_size=polygon_size, sim_time=200, step_size=2)
+"""
