@@ -1,6 +1,6 @@
 # Visualizing the Structure of Lenia Parameter Space
 
-This code is used to automatically attribute to each single-channel Lenia one of four dynamical classes.
+This code is used to automatically attribute to each single-channel Lenia one of four dynamical classes. You can see the results [here](https://lenia-explorer.vercel.app/).
 
 ## How to use:
 1. Install the requirements in requirements.txt
@@ -27,10 +27,10 @@ Given a Lenia system with global update function F, and an initial configuration
 ###Stable Phase
 The trajecotry belongs to the stable phase if it loops; i.e., if there exist 0 <= i < j <= Tmax such that F^i(A^0) = F^j(A^0). Since it is expensive to remember the whole trajectory, we approximate this by checking whether the centers of mass of two distinct configurations as well as their total mass match exactly.
 
-####Metastable Phase
+###Metastable Phase
 The trajectory belongs to the metastable phase if it is not stable and if its center of mass stabilizes around its long-term mean. Specifically, we look at the trajectory's part F^(Tmax - wondowsize)(A^0), ..., F^Tmax(A^0), compute the center of mass' mean, and check that for each configuration in this window, it holds that it does not differ from the mean by more than std.
 
-####Unclassified
+###Unclassified
 The trajectory is not stable, nor metastable.
 
 
