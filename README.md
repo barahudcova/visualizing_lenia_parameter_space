@@ -24,7 +24,7 @@ std = 3
 
 Given a Lenia system with global update function F, and an initial configuration A^0 which (a 2_d array of values between 0 and 1) we generate a trajectory A^0, F(A^0), ..., F^Tmax(A^0). For each element of the trajectory, we store the configration's center of mass (x and y coordinate) and the total mass. The trajectory is classified into one of the following phases:
 
-####Stable Phase
+###Stable Phase
 The trajecotry belongs to the stable phase if it loops; i.e., if there exist 0 <= i < j <= Tmax such that F^i(A^0) = F^j(A^0). Since it is expensive to remember the whole trajectory, we approximate this by checking whether the centers of mass of two distinct configurations as well as their total mass match exactly.
 
 ####Metastable Phase
