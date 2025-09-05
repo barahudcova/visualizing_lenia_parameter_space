@@ -16,4 +16,5 @@ utils/*.pickle
 ./utils/polygons200.pickle
 ./lenia_numpy_fft.py
 ./batch_approx_phases_jax_rescan.py
+./compatibility.py
 
