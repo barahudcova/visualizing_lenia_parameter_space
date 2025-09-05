@@ -8,6 +8,7 @@ utils/*.pickle
 #ignore everything in .venv directory
 .venv/
 
+./frames
 ./.git/objects/d7/8a1245f8a91332ec49d21396832c5730ad91ec
 ./.git/objects/22/dad000a2d1d60ab2a4eb1c50940384b2ebcae7
 ./unif_random_voronoi/0.5_0.15_27/all_data.json
