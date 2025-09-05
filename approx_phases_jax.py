@@ -16,13 +16,14 @@ import jax
 import jax.numpy as jnp
 
 
-
-TIME_BOUND = 200 # in seconds
-
 def classify(phases):
+    # order correspond to the stable phase
+    # chaos corresponds to metastable phase
+    # max corresponds to solitons
+
     if phases == {"order"}:
         return "order"
-    elif phases == {"chaos"}: #or phases == {"chaos", "max"}:
+    elif phases == {"chaos"}:
         return "chaos"
     elif phases == {"order", "chaos", "max"}:
         return "max"
@@ -65,6 +66,14 @@ def check_mass(xmass_history, ymass_history, std, window_size, current_time):
     return chaos
 
 def get_batch_phases(auto, mass_centers_x, mass_centers_y, total_masses, std, window_size):
+    """
+    Determine a phase (order ~ stable, chaos ~ metastable, max ~ soliton) for each configuration in the batch based on the stability of their mass centers and total masses.
+    1. If the latest total mass and mass centers match any previous values, we hypothesize the system has enetered a loop and classify as "order" ~ stable phase.
+    2. If the system did not enter a loop, but the mass centers are stable within a defined threshold (std) over a specified window size, classify as "chaos" ~ metastable phase.
+    3. Otherwise, classify as "max" ~ solitons.
+    """
+
+
     phases = [None] * auto.batch
 
     
@@ -94,17 +103,18 @@ def get_batch_phases(auto, mass_centers_x, mass_centers_y, total_masses, std, wi
             phases[b] = "max"
     return phases
 
-# @timeout(TIME_BOUND)
-def get_approx_trans(auto, std, window_size):
-    config = auto.state
-    array_size = config.shape[-1]
-    T_MAX = int(np.round(100*np.log2(array_size)))
 
-    mass_centers_x = np.zeros((T_MAX, auto.batch))
-    mass_centers_y = np.zeros((T_MAX, auto.batch))
-    total_masses = np.zeros((T_MAX, auto.batch))
+def iterate_and_get_approx_phases(auto, std, window_size, t_max):
+    """
+    Iterate whole batch of Lenia init configurations, stores mass centers and total masses,
+    and computes approximate dynamical phases based on their stability.
+    """
 
-    for t in range(T_MAX):
+    mass_centers_x = np.zeros((t_max, auto.batch))
+    mass_centers_y = np.zeros((t_max, auto.batch))
+    total_masses = np.zeros((t_max, auto.batch))
+
+    for t in range(t_max):
         auto.step()
         cm, tm = auto.get_batch_mass_center(auto.state)
         mass_centers_x[t]=cm[0]
@@ -118,6 +128,18 @@ def get_approx_trans(auto, std, window_size):
 
 
 def get_approx_data(auto, polygon_size_range, array_size, samples, params):
+    """
+    Generates approximate dynamical phase data for the Lenia system given by params.
+    Hyperparameters:
+    t_max : maximal number of iterations for each initial configuration (this is increased 10 times if a max phase is detected)
+    std : threshold for stability of mass center 
+    window_size : number of iterations over which stability of mass center is checked
+    """
+    std = 3
+    window_size = 200
+    t_max = int(np.round(100*np.log2(array_size)))
+
+
     batch_size = auto.batch
     folder_name = auto.kernel_path
 
@@ -130,27 +152,26 @@ def get_approx_data(auto, polygon_size_range, array_size, samples, params):
 
     path = f"{folder_name}/data/{g_mju}_{g_sig}.pickle"
 
-    std = 3
-    window_size = 200
+
 
     PH_TUP = []
     PH = []
+
+    try:
+        with open(path, 'rb') as handle:
+            data = pickle.load(handle)
+    except:
+        data = {"params": params} 
+
+    try:
+        _ = data[str(array_size)]
+    except:
+        data[str(array_size)] = {}
 
     
     for polygon_size in polygon_size_range:
         start = time.time()
         print("polygon size: ", polygon_size)
-
-        try:
-            with open(path, 'rb') as handle:
-                data = pickle.load(handle)
-        except:
-            data = {"params": params}
-
-        try:
-            _ = data[str(array_size)]
-        except:
-            data[str(array_size)] = {}
 
         try:
             ph = [t for t in data[str(array_size)][str(polygon_size)]["phase"]]
@@ -180,7 +201,20 @@ def get_approx_data(auto, polygon_size_range, array_size, samples, params):
             #auto.plot_voronoi_batch()
             seeds = auto.seeds
 
-            phases = get_approx_trans(auto, std, window_size)
+            phases = iterate_and_get_approx_phases(auto, std, window_size, t_max=t_max)
+
+            if "max" in phases:
+                auto.set_init_voronoi_batch(polygon_size, batch_index)
+                seeds = auto.seeds
+
+                print(f"{g_mju}, {g_sig} - {polygon_size} - {t_max}, found max, recomputing phases")
+                print("old phases: ", set(phases))
+
+                t_max = int(np.round(1000*np.log2(array_size)))
+                phases = iterate_and_get_approx_phases(auto, std, window_size, t_max=t_max)
+                print("new phases: ", set(phases))
+
+
 
             data[str(array_size)][str(polygon_size)]["phase"]+=phases
             data[str(array_size)][str(polygon_size)]["seed"]+=seeds
@@ -207,10 +241,9 @@ def get_approx_data(auto, polygon_size_range, array_size, samples, params):
             
 
 #============================== PARAMETERS ================================
-W,H = 200,200 # Size of the automaton
-array_size = W
+array_size = 100  # Size of the Lenia world
 dt = 0.1 # Time step size
-num_channels= 1
+num_channels= 1 # Number of channels in the Lenia world, we only use 1 channel
 device = 0    #index of device available
 
 print(jax.devices())
@@ -220,68 +253,57 @@ jax.config.update("jax_default_device", jax.devices()[device])
 samples = 64  # total number of data samples per polygon size
 B = 64  # batch size
 
-polygon_size_range = [10,20,30,40,50,60,70,80,90]
-#======================================================================
+polygon_size_range = [10,20,30,40,50,60,70,80,90] # range of polygon sizes to be explored
+
+k_func = "gauss"     # kernel function type: gaussian bump, other types include "exp" and "quad4"
 
 
-beta = [1.0, 0.5]
-k_mju = [0.5]
-k_sig = [0.15]
+beta = [1.0]        # beta parameter determining the number of kernel "bumps" and their weight
+k_mju = [0.5]       # k_mju parameter determining the center of the kernel, only applicable for func_ = "gauss", other kernel types do not depend on this value
+k_sig = [0.15]      # k_sig parameter determining the width of the kernel, only applicable for func_ = "gauss", other kernel types do not depend on this value
+
+k_radius = 13       # kernel radius  
+
+g_mu = 0.15        # growth mu parameter
+g_sig = 0.015       # growth sigma parameter
 
 params = {
-    'k_size': 57, 
-    'mu': jnp.array([[[0.5]]]), 
-    'sigma': jnp.array([[[0.15]]]), 
+    'k_size': 2*k_radius+1, 
+    'mu': jnp.array([[[g_mu]]]), 
+    'sigma': jnp.array([[[g_sig]]]), 
     'beta': jnp.array([[[beta]]]), 
     'mu_k': jnp.array([[[k_mju]]]), 
     'sigma_k': jnp.array([[[k_sig]]]), 
     'weights': jnp.array([[[1.0]]]),
-    'func_k': 'quad4',
+    'func_k': k_func,
 } 
 
 
-""" beta = [1]
-k_mju = [0.5]
-k_sig = [0.15]
+#============================= GENERATING DATA ====================================
+# Generating dynamical phase data for the Lenia system given by params
+# !! Note that the file polygons_{array_size}.pickle should already exist in the utils folder, if it does not exist, generate it with the voronoi_polygons.py script !!
 
-params = {
-    'k_size': 27, 
-    'mu': jnp.array([[[0.5]]]), 
-    'sigma': jnp.array([[[0.15]]]), 
-    'beta': jnp.array([[[beta]]]), 
-    'mu_k': jnp.array([[[k_mju]]]), 
-    'sigma_k': jnp.array([[[k_sig]]]), 
-    'weights': jnp.array([[[1.0]]]),
-    'func_k': 'exp_mu_sig',
-} 
- """
-
-
-
-#======================================================================
-# Initializing automaton with batch size = 1 to get the exact same kernel every time for reproducibility
-
-#auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params)
-#print(auto.batch)
+# The data generation is computationally heavy and will run a few days on a gpu
+# The results are stored in unif_random_voronoi/kernel_folder/data file
 
 #======================================================================
 
 start = time.time()
 
-auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params, device=device)
+auto = MultiLeniaJAX((array_size, array_size), batch=B, num_channels=1, dt=0.1, params=params, device=device)
 auto.plot_kernel()
 
-for g_mju in np.arange(0.3, 0.33, 0.005):
-    g_mju = np.round(g_mju, 4)
+for g_mju in np.arange(0.1, 0.5, 0.005):
+    g_mju = np.round(g_mju, 5)
     for g_sig in np.arange(0.001,0.1, 0.001):
-        g_sig = np.round(g_sig, 4)
+        g_sig = np.round(g_sig, 5)
 
         params["mu"] = jnp.put(params["mu"], jnp.array([0,0,0]), g_mju, inplace=False)
         params["sigma"] = jnp.put(params["sigma"], jnp.array([0,0,0]), g_sig, inplace=False)
 
         print(params)
 
-        auto = MultiLeniaJAX((W, H), batch=B, num_channels=1, dt=0.1, params=params, device=device)
+        auto = MultiLeniaJAX((array_size, array_size), batch=B, num_channels=1, dt=0.1, params=params, device=device)
         ph_tup, ph = get_approx_data(auto, polygon_size_range, array_size, samples, params) 
 
         # in case finer polygon sizes are wanted:
@@ -302,5 +324,4 @@ for g_mju in np.arange(0.3, 0.33, 0.005):
                 print(ph) 
 
                 
-
 print(time.time()-start)

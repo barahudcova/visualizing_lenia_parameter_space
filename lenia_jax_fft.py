@@ -8,10 +8,12 @@ import pygame
 import imageio.v2 as imageio
 from functools import partial
 from jax import jit, vmap
-from utils.voronoi_polygons import load_pattern
+from utils.voronoi_polygons import load_pattern, crop_mask
 import matplotlib.pyplot as plt
+import sys
 
 jax.config.update("jax_enable_x64", True)
+jnp.set_printoptions(threshold=sys.maxsize)
 
 class LeniaParams:
     """JAX version of LeniaParams to store and manage Lenia parameters."""
@@ -153,7 +155,7 @@ class MultiLeniaJAX(Automaton):
         self.state = jax.random.uniform(key, shape=(self.batch, self.C, self.h, self.w))
 
         #initialize kernel func:
-        if self.params['func_k'] == 'exp_mu_sig':
+        if self.params['func_k'] == 'gauss':
             self.func_k = lambda r: jnp.exp(-((r - self.mu_k) / self.sigma_k)**2 / 2)
         elif self.params['func_k'] == 'exp':
             self.func_k = lambda r: np.exp( 4 - 1 / (r * (1-r)) )
@@ -280,7 +282,7 @@ class MultiLeniaJAX(Automaton):
         
         # Convert to JAX array
         self.state = jnp.array(states_np)
-        print(self.state.device)
+        #print(self.state.device)
 
     def plot_voronoi_batch(self, figsize=(15, 10), save_path="inits.png"):
         cmap = "gray"
@@ -387,7 +389,7 @@ class MultiLeniaJAX(Automaton):
         
         # Compute radius values
         r = jnp.sqrt(x**2 + y**2)
-        print(r.shape)
+        #print(r.shape)
         b = len(self.beta)
         beta = None
 
@@ -606,6 +608,7 @@ class MultiLeniaJAX(Automaton):
         
         self.set_init_voronoi_batch(polygon_size=polygon_size, init_polygon_index=init_polygon_index, seeds=seeds)
         
+        
         # Create directory for frames
         frames_dir = "frames"
         os.makedirs(frames_dir, exist_ok=True)
@@ -617,6 +620,8 @@ class MultiLeniaJAX(Automaton):
         
         for t in range(sim_time):
             self.step()
+
+
     
             if t % step_size == 0:  # Save every 4th frame to reduce file count
                 self.draw()
@@ -626,6 +631,9 @@ class MultiLeniaJAX(Automaton):
                 # Update display
                 pygame.display.get_surface().blit(self.worldsurface, (0, 0))
                 pygame.display.flip()
+
+        #print(crop_mask(self.state[0][0]).shape)
+        #print(crop_mask(self.state[0][0]).tolist())
 
         # Save final state
         self.draw()
@@ -645,46 +653,58 @@ class MultiLeniaJAX(Automaton):
 
         pygame.quit()
 
+        
 
 
+""" #=========================================================================
 #---------------------------------EXAMPLE---------------------------------
 
+#PARAMETERS:
 
+array_size = 100  # Size of the Lenia world
+dt = 0.1 # Time step size
+num_channels= 1 # Number of channels in the Lenia world, we only use 1 channel
+device = 0    #index of device available
 
-samples = 64  # total number of data samples per polygon size
-beta = [1, 0.5]
-k_mju = [0.5]
-k_sig = [0.15]
+k_func = "gauss"     # kernel function type: gaussian bump, other types include "exp" and "quad4"
 
+beta = [1.0]        # beta parameter determining the number of kernel "bumps" and their weight
+k_mju = [0.5]       # k_mju parameter determining the center of the kernel, only applicable for func_ = "gauss", other kernel types do not depend on this value
+k_sig = [0.15]      # k_sig parameter determining the width of the kernel, only applicable for func_ = "gauss", other kernel types do not depend on this value
 
-B = 64  # batch size
+k_radius = 13       # kernel radius  
 
-polygon_size_range = [10,20,30,40,50,60,70,80,90]
-#======================================================================
+g_mu = 0.15        # growth mu parameter
+g_sig = 0.015       # growth sigma parameter
 
-
-""" params = {
-    'k_size': 37, 
-    'mu': jnp.array([[[0.2]]]), 
-    'sigma': jnp.array([[[0.022]]]), 
+params = {
+    'k_size': 2*k_radius+1, 
+    'mu': jnp.array([[[g_mu]]]), 
+    'sigma': jnp.array([[[g_sig]]]), 
     'beta': jnp.array([[[beta]]]), 
     'mu_k': jnp.array([[[k_mju]]]), 
     'sigma_k': jnp.array([[[k_sig]]]), 
     'weights': jnp.array([[[1.0]]]),
-    'func_k': 'quad4',
+    'func_k': k_func,
 } 
 
-
+# INITIALIZE LENIA SYSTEM
 
 # Create Lenia instance
-lenia = MultiLeniaJAX((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+lenia = MultiLeniaJAX((array_size, array_size), batch=1, num_channels=num_channels, dt=dt, params=params)
+
+# plot Lenia kernel
 lenia.plot_kernel()
 
-polygon_size = 35
+# Create initial configurations with noise patch of a given size
+polygon_size = 50
 lenia.set_init_voronoi_batch(polygon_size=polygon_size)
-#lenia.plot_voronoi_batch(figsize=(15, 10), save_path="inits.png")
+
+sample = 6     #which polygon to use for initialization
+seed = 2984858590
+
+# MAKE VIDEO
+lenia.make_video(seeds=[seed], polygon_size=polygon_size, init_polygon_index=sample, sim_time=1500, step_size=2)   
 
 
-seeds=[42]
-lenia.make_video(seeds=seeds, polygon_size=polygon_size, sim_time=200, step_size=2)
- """
+#========================================================================== """

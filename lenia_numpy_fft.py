@@ -4,9 +4,11 @@ import os
 import random
 import pygame
 import imageio.v2 as imageio
-from utils.voronoi_polygons import load_pattern
+from utils.voronoi_polygons import load_pattern, crop_mask
 import matplotlib.pyplot as plt
+import sys
 
+np.set_printoptions(threshold=sys.maxsize)
 
 class LeniaParams:
     """NumPy version of LeniaParams to store and manage Lenia parameters."""
@@ -44,9 +46,9 @@ class LeniaParams:
                 'weights': self.weights,
                 'func_k': 'exp_mu_sig'
             }
-    
+        
     def to(self, device):
-        # NumPy doesn't have device placement, so this is a no-op
+        # NumPy doesn't need device management, so this is a no-op
         # but kept for API compatibility
         pass
     
@@ -71,8 +73,8 @@ class Automaton:
         
     def draw(self):
         if self._worldmap is not None:
-            # Convert array to proper format for pygame
-            array = (self._worldmap.transpose(1, 2, 0) * 255).astype(np.uint8)
+            # Convert from NumPy array
+            array = np.asarray(self._worldmap.transpose(1, 2, 0) * 255).astype(np.uint8)
             
             # Create pygame surface from the array
             self.worldsurface = pygame.surfarray.make_surface(array)
@@ -123,8 +125,8 @@ class MultiLeniaNumPy(Automaton):
         self.kernel_path = "unif_random_voronoi/" + kernel_folder
 
         if not os.path.exists(self.kernel_path):
-            os.makedirs(self.kernel_path, exist_ok=True)
-            os.makedirs(f"{self.kernel_path}/data", exist_ok=True)
+            os.mkdir(self.kernel_path)
+            os.mkdir(f"{self.kernel_path}/data")
 
         self.g_mu = np.round(params["mu"].item(), 4)
         self.g_sig = np.round(params["sigma"].item(), 4)
@@ -141,7 +143,7 @@ class MultiLeniaNumPy(Automaton):
         self.state = np.random.uniform(0, 1, size=(self.batch, self.C, self.h, self.w))
 
         # Initialize kernel func:
-        if self.params['func_k'] == 'exp_mu_sig':
+        if self.params['func_k'] == 'gauss':
             self.func_k = lambda r: np.exp(-((r - self.mu_k) / self.sigma_k)**2 / 2)
         elif self.params['func_k'] == 'exp':
             self.func_k = lambda r: np.exp(4 - 1 / (r * (1-r)))
@@ -186,7 +188,7 @@ class MultiLeniaNumPy(Automaton):
         self.to_save_param_path = 'SavedParameters/Lenia'
 
     def to(self, device):
-        # NumPy doesn't have device placement, so this is a no-op
+        # NumPy doesn't need device management, so this is a no-op
         # but kept for API compatibility
         pass
     
@@ -259,10 +261,10 @@ class MultiLeniaNumPy(Automaton):
             
             # Generate random state and apply mask
             rand_np = np.random.rand(1, self.C, self.h, self.w)
-            pattern = rand_np * mask
+            pattern = np.asarray(rand_np * mask)
             states_np[i] = pattern[0]
         
-        # Convert to NumPy array (already is one)
+        # Set state
         self.state = states_np
 
     def plot_voronoi_batch(self, figsize=(15, 10), save_path="inits.png"):
@@ -362,7 +364,6 @@ class MultiLeniaNumPy(Automaton):
         
         # Compute radius values
         r = np.sqrt(x**2 + y**2)
-        print(r.shape)
         b = len(self.beta)
         beta = None
 
@@ -529,6 +530,7 @@ class MultiLeniaNumPy(Automaton):
         mask = (total_mass != 0)
         
         # Normalize by total mass where total mass is not zero
+        # Using NumPy's where function to conditionally update values
         sum_mass = np.where(
             mask.reshape(1, -1),  # Reshape mask to match sum_mass dimensions
             sum_mass / np.where(mask, total_mass, 1.0),  # Divide by mass where mask is True
@@ -587,7 +589,7 @@ class MultiLeniaNumPy(Automaton):
         
         for t in range(sim_time):
             self.step()
-    
+
             if t % step_size == 0:  # Save every step_size frames to reduce file count
                 self.draw()
                 pygame.image.save(self.worldsurface, f"{frames_dir}/frame_{frame_count:04d}.png")
@@ -616,37 +618,52 @@ class MultiLeniaNumPy(Automaton):
         pygame.quit()
 
 
-#---------------------------------EXAMPLE---------------------------------
+# =========================================================================
+# ---------------------------------EXAMPLE---------------------------------
 
-# Example usage (commented out)
-"""
-samples = 64  # total number of data samples per polygon size
-beta = [1, 0.5]
-k_mju = [0.5]
-k_sig = [0.15]
+# PARAMETERS:
 
-B = 64  # batch size
+array_size = 100  # Size of the Lenia world
+dt = 0.1 # Time step size
+num_channels = 1 # Number of channels in the Lenia world, we only use 1 channel
+device = 0    # index of device available (not used in NumPy version)
 
-polygon_size_range = [10,20,30,40,50,60,70,80,90]
+k_func = "gauss"     # kernel function type: gaussian bump, other types include "exp" and "quad4"
+
+beta = [1.0]        # beta parameter determining the number of kernel "bumps" and their weight
+k_mju = [0.5]       # k_mju parameter determining the center of the kernel, only applicable for func_ = "gauss"
+k_sig = [0.15]      # k_sig parameter determining the width of the kernel, only applicable for func_ = "gauss"
+
+k_radius = 13       # kernel radius  
+
+g_mu = 0.15        # growth mu parameter
+g_sig = 0.015       # growth sigma parameter
 
 params = {
-    'k_size': 37, 
-    'mu': np.array([[[0.2]]]), 
-    'sigma': np.array([[[0.022]]]), 
+    'k_size': 2*k_radius+1, 
+    'mu': np.array([[[g_mu]]]), 
+    'sigma': np.array([[[g_sig]]]), 
     'beta': np.array([[[beta]]]), 
     'mu_k': np.array([[[k_mju]]]), 
     'sigma_k': np.array([[[k_sig]]]), 
     'weights': np.array([[[1.0]]]),
-    'func_k': 'quad4',
+    'func_k': k_func,
 } 
 
+# INITIALIZE LENIA SYSTEM
+
 # Create Lenia instance
-lenia = MultiLeniaNumPy((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+lenia = MultiLeniaNumPy((array_size, array_size), batch=1, num_channels=num_channels, dt=dt, params=params)
+
+# plot Lenia kernel
 lenia.plot_kernel()
 
-polygon_size = 35
+# Create initial configurations with noise patch of a given size
+polygon_size = 50
 lenia.set_init_voronoi_batch(polygon_size=polygon_size)
 
-seeds=[42]
-lenia.make_video(seeds=seeds, polygon_size=polygon_size, sim_time=200, step_size=2)
-"""
+sample = 6     # which polygon to use for initialization
+seed = 2984858590
+
+# MAKE VIDEO
+lenia.make_video(seeds=[seed], polygon_size=polygon_size, init_polygon_index=sample, sim_time=1500, step_size=2)

@@ -230,12 +230,15 @@ def plot_voronoi_sample_from_file(array_size, rand_size, sample):
     plt.matshow(init_config)
     plt.savefig(f'polygons_area{rand_size}_sample{sample}.png')
 
-def plot_all_voronoi_samples_from_file(array_size, rand_size):
+def plot_all_voronoi_samples_from_file(array_size, rand_size, with_noise=False, num_samples = None):
     with open(f'polygons{array_size}.pickle', 'rb') as handle:
         data = pickle.load(handle)
     
     samples = data[rand_size]
-    num_samples = len(samples)
+    if num_samples:
+        samples = data[rand_size][:num_samples]
+    else:
+        num_samples = len(samples)
     
     # Calculate grid dimensions for subplots
     grid_size = int(np.ceil(np.sqrt(num_samples)))
@@ -253,7 +256,9 @@ def plot_all_voronoi_samples_from_file(array_size, rand_size):
             mask = np.asarray(sample_mask, dtype=int)
             init_config = load_pattern(mask.reshape(1, *mask.shape), 
                                      [array_size, array_size]).reshape(array_size, array_size)
-            im = axes[i].matshow(init_config)
+            noise = np.random.uniform(0, 1, init_config.shape) if with_noise else np.ones(init_config.shape)
+            config = init_config*noise
+            axes[i].matshow(config, cmap='gray', vmin=0, vmax=1)
             axes[i].set_xticks([])  # Remove x-axis ticks
             axes[i].set_yticks([])  # Remove y-axis ticks
             axes[i].axis('off')  # Turn off axes completely
@@ -263,7 +268,7 @@ def plot_all_voronoi_samples_from_file(array_size, rand_size):
         axes[i].axis('off')
         
     plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust layout to make room for suptitle
-    plt.savefig(f'utils/polygons_area{rand_size}_all_samples.png', dpi=150)
+    plt.savefig(f'polygons_area{rand_size}_all_samples.png', dpi=150)
     plt.close()
     
     print(f"Saved plot with all {num_samples} samples of size {rand_size}")
@@ -272,12 +277,18 @@ def plot_all_voronoi_samples_from_file(array_size, rand_size):
 #============================== EXAMPLE ================================
 #generate polygons of all sizes between 10 and 90, with 10 samples each, all fitting in a 100x100 array (we want at least 128 samples, but ideally 1024)
 
-array_size = 200
-rand_sizes = range(10, 101)
+array_size = 100
+rand_sizes = range(10, 91)
 samples = 256
 
+
+# for reproducibility of our results, keep this seed fixed
 seed = 42
+#UNCOMMENT THIS TO GENERTATE POLYGONS
 #generate_random_polygons(array_size, rand_sizes, samples, seed)
 
+
+
+#Visualize the voronoi samples
 #rand_size=60
-#plot_all_voronoi_samples_from_file(array_size, rand_size)
+#plot_all_voronoi_samples_from_file(array_size, rand_size=50, with_noise=True)

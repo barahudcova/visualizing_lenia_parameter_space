@@ -15,6 +15,9 @@ import jax.numpy as jnp
 from lenia_jax_fft import MultiLeniaJAX
 
 
+DIGITS = 8
+
+
 class CPU_Unpickler(pickle.Unpickler):
     def find_class(self, module, name):
         if module == 'torch.storage' and name == '_load_from_bytes':
@@ -66,6 +69,28 @@ def get_global_phase(folder_name, g_mju, g_sig, mode="unif_random_voronoi", arra
             continue
     return classify(phases)
 
+def get_video(folder_name, params, polygon_size, sample, mode="unif_random_voronoi", array_size=100, time_steps=100, device='cuda'):
+    g_mju = np.round(params["mu"][0][0][0].item(), 5)
+    g_sig = np.round(params["sigma"][0][0][0].item(), 5)
+    
+    path = f'{mode}/{folder_name}/data/{g_mju}_{g_sig}.pickle'
+    file = open(path, "rb")
+    data = pickle.load(file)[str(array_size)]
+
+
+    seeds = data[str(polygon_size)]["seed"]
+    print("Number of seeds: ", len(seeds))
+
+
+    auto = MultiLeniaJAX((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+    auto.to(device)
+
+
+    
+    video_path=f"{mode}/{folder_name}/videos_test/{polygon_size}_{sample}_{seeds[sample]}.gif"
+    auto.make_video(seeds=[seeds[sample]], polygon_size=polygon_size, init_polygon_index=sample, sim_time=6500, step_size=1, save_path=video_path)
+
+
 def get_phase_video(folder_name, phase, g_mju, g_sig, mode="unif_random_voronoi", array_size=100, time_steps=100, device='cuda'):
     path = f'{mode}/{folder_name}/data/{g_mju}_{g_sig}.pickle'
     file = open(path, "rb")
@@ -104,11 +129,11 @@ def get_phase_video(folder_name, phase, g_mju, g_sig, mode="unif_random_voronoi"
         except:
             continue
         
-def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, mode="unif_random_voronoi", array_size=100):    
+def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, k_size, mode="unif_random_voronoi", array_size=100):    
     for g_mju in g_mju_range:
         for g_sig in g_sig_range:
-            g_mju = np.round(g_mju, 4)
-            g_sig = np.round(g_sig, 4)
+            g_mju = np.round(g_mju, DIGITS)
+            g_sig = np.round(g_sig, DIGITS)
             try: 
                 path = f'{mode}/{folder_name}/data/{g_mju}_{g_sig}.pickle'
                 print("path: ", path)
@@ -120,7 +145,7 @@ def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_
 
 
                 params = {
-                    'k_size': 37, 
+                    'k_size': k_size, 
                     'mu': jnp.array([[[g_mju]]]), 
                     'sigma': jnp.array([[[g_sig]]]), 
                     'beta': jnp.array([[[beta]]]), 
@@ -131,7 +156,7 @@ def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_
                 } 
 
 
-                auto = MultiLeniaJAX((100, 100), batch=1, num_channels=1, dt=0.1, params=params)
+                auto = MultiLeniaJAX((array_size, array_size), batch=1, num_channels=1, dt=0.1, params=params)
 
 
                 polygon_size_range = np.arange(10, 100, 1)
@@ -162,9 +187,9 @@ def get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_
 
 def plot_phase_proportion(folder_name, mode="unif_random_voronoi", array_size=100):
     for g_mju in np.arange(0.1, 0.5, 0.005):
-        g_mju = np.round(g_mju, 4)
+        g_mju = np.round(g_mju, DIGITS)
         for g_sig in np.arange(0.001,0.1, 0.001):
-            g_sig = np.round(g_sig, 4)
+            g_sig = np.round(g_sig, DIGITS)
             
  
             path = f'{mode}/{folder_name}/data/{g_mju}_{g_sig}.pickle'
@@ -182,7 +207,7 @@ def plot_phase_proportion(folder_name, mode="unif_random_voronoi", array_size=10
             D = pickle.load(file)
 
             phase = get_global_phase(folder_name, g_mju, g_sig)
-            if phase == "max":
+            if phase:
 
                 print(g_mju, g_sig)
                 random_range = range(0, 100)
@@ -234,16 +259,18 @@ def plot_phase_proportion(folder_name, mode="unif_random_voronoi", array_size=10
 
                 plt.savefig(f"{mode}/{folder_name}/prop_plots/{g_mju}_{g_sig}.png")
                 plt.close()
-         
-def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi", array_size=100):
-    D = {"order": {"x": [], "y": []}, "chaos": {"x": [], "y": []}, "max": {"x": [], "y": []},  "no phase": {"x": [], "y": []}, "trans": {"x": [], "y": []}, "TBA": {"x": [], "y": []}}
 
 
+def print_graph_zoom(folder_name, mu_start=0.1, mu_end=0.5, mu_step=0.005, 
+                sig_start=0.001, sig_end=0.1, sig_step=0.001, 
+                save_filename="phases_data.png", mode="unif_random_voronoi", array_size=100):
+    D = {"order": {"x": [], "y": []}, "chaos": {"x": [], "y": []}, "max": {"x": [], "y": []},  
+         "no phase": {"x": [], "y": []}, "trans": {"x": [], "y": []}, "TBA": {"x": [], "y": []}}
 
-    for g_mju in np.arange(0.1, mju_lim, 0.005):
-        g_mju = np.round(g_mju, 4)
-        for g_sig in np.arange(0.001,sig_lim, 0.001):
-            g_sig = np.round(g_sig, 4)
+    for g_mju in np.arange(mu_start, mu_end, mu_step):
+        g_mju = np.round(g_mju, 5)
+        for g_sig in np.arange(sig_start, sig_end, sig_step):
+            g_sig = np.round(g_sig, 5)
             try:
                 phase = get_global_phase(folder_name, g_mju, g_sig, mode, array_size=array_size)
                 print(g_mju, g_sig, phase)
@@ -254,40 +281,102 @@ def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi
                 #print("error", g_mju, g_sig)
                 continue 
 
-
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    # Set limits for x and y axes (similar to the image)
-    ax.set_xlim(0, sig_lim)
-    ax.set_ylim(0.1, mju_lim)
+    # Set limits for x and y axes
+    ax.set_xlim(sig_start, sig_end)
+    ax.set_ylim(mu_start, mu_end)
 
     # Add major gridlines
     ax.grid(True, which='major', color='gray', linestyle='-', linewidth=0.7)
 
     # Add minor gridlines
-    ax.minorticks_on()
-    ax.grid(True, which='minor', color='lightgray', linestyle='--', linewidth=0.5)
+    #ax.minorticks_on()
+    #ax.grid(True, which='minor', color='lightgray', linestyle='--', linewidth=0.5)
 
     # Set major and minor ticks
-    ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 2)])  # Major ticks every 0.02
-    ax.set_yticks([i / 10 for i in range(1, int(10*mju_lim)+1)])  # Major ticks every 0.1
-    ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 1)], minor=True)  # Minor ticks every 0.01
-    ax.set_yticks([i / 100 for i in range(10, int(100*mju_lim)+1, 5)], minor=True)  # Minor ticks every 0.05
+
+
+    ax.set_xticks(list(np.arange(sig_start, sig_end, 0.001)))  # Major ticks every 0.02
+    ax.set_yticks(list(np.arange(mu_start, mu_end, 0.005)))  # Major ticks every 0.1
+    #ax.set_yticks([i / 10 for i in range(int(10*(mu_start)), int(10*mu_end)+1)])  # Major ticks every 0.1
+    #ax.set_xticks([i / 100 for i in range(int(100*sig_start), int(100*sig_end)+1, 1)], minor=True)  # Minor ticks every 0.01
+    #ax.set_yticks([i / 100 for i in range(int(100*mu_start), int(100*mu_end)+1, 5)], minor=True)  # Minor ticks every 0.05
 
     # Set labels for axes (σ and μ)
     ax.set_xlabel(r'$\sigma$', fontsize=14)
     ax.set_ylabel(r'$\mu$', fontsize=14)
-    size=3
+    size=8
 
     # Scatter plot with labels
-    ax.scatter(D["order"]["x"], D["order"]["y"], color='#718fdc', label='order', s=size)
-    ax.scatter(D["chaos"]["x"], D["chaos"]["y"], color='#91d4c4', label='chaos', s=size)
-    ax.scatter(D["trans"]["x"], D["trans"]["y"], color='#f4c454', label='trans', s=size)
-    ax.scatter(D["max"]["x"], D["max"]["y"], color='#ff9585', label='solitons', s=size)
+    ax.scatter(D["order"]["x"], D["order"]["y"], color='#FFEE8C', label='order', s=size)
+    ax.scatter(D["chaos"]["x"], D["chaos"]["y"], color='#0072B2', label='chaos', s=size)
+    ax.scatter(D["trans"]["x"], D["trans"]["y"], color='#F3C151', label='trans', s=size)
+    ax.scatter(D["max"]["x"], D["max"]["y"], color='#b35002', label='solitons', s=size)
     ax.scatter(D["no phase"]["x"], D["no phase"]["y"], color='red', label='no phase', s=size)
 
     # Add a legend
     ax.legend()
+
+    # Show the plot
+    plt.savefig(f"{mode}/{folder_name}/{save_filename}")
+
+def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi", array_size=100):
+    D = {"order": {"x": [], "y": []}, "chaos": {"x": [], "y": []}, "max": {"x": [], "y": []},  "no phase": {"x": [], "y": []}, "trans": {"x": [], "y": []}, "TBA": {"x": [], "y": []}}
+
+    for g_mju in np.arange(0.1, mju_lim, 0.005):
+        g_mju = np.round(g_mju, DIGITS)
+        for g_sig in np.arange(0.001,sig_lim, 0.001):
+            g_sig = np.round(g_sig, DIGITS)
+            try:
+                phase = get_global_phase(folder_name, g_mju, g_sig, mode, array_size=array_size)
+                #print(g_mju, g_sig, phase)
+                D[phase]["x"].append(g_sig)
+                D[phase]["y"].append(g_mju)
+        
+            except:
+                #print("error", g_mju, g_sig)
+                continue 
+
+
+    #fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(4, 3))
+
+    # Set limits for x and y axes (similar to the image)
+    ax.set_xlim(0, sig_lim)
+    ax.set_ylim(0.1, mju_lim)
+
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    # Add major gridlines
+    #ax.grid(True, which='major', color='gray', linestyle='-', linewidth=0.7)
+
+    # Add minor gridlines
+    #ax.minorticks_on()
+    #ax.grid(True, which='minor', color='lightgray', linestyle='--', linewidth=0.5)
+
+    # Set major and minor ticks
+    #ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 2)])  # Major ticks every 0.02
+    #ax.set_yticks([i / 10 for i in range(1, int(10*mju_lim)+1)])  # Major ticks every 0.1
+    #ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 1)], minor=True)  # Minor ticks every 0.01
+    #ax.set_yticks([i / 100 for i in range(10, int(100*mju_lim)+1, 5)], minor=True)  # Minor ticks every 0.05
+
+    # Set labels for axes (σ and μ)
+    #ax.set_xlabel(r'$\sigma$', fontsize=14)
+    #ax.set_ylabel(r'$\mu$', fontsize=14)
+    size=5
+    #size=3
+
+    # Scatter plot with labels
+    ax.scatter(D["order"]["x"], D["order"]["y"], color='#fcf3d7', label='order', s=size)
+    ax.scatter(D["chaos"]["x"], D["chaos"]["y"], color='#0072B2', label='chaos', s=size)
+    ax.scatter(D["trans"]["x"], D["trans"]["y"], color='#F3C151', label='trans', s=size)
+    ax.scatter(D["max"]["x"], D["max"]["y"], color='#b35002', label='solitons', s=size)
+    ax.scatter(D["no phase"]["x"], D["no phase"]["y"], color='red', label='no phase', s=size)
+
+    # Add a legend
+    #ax.legend()
 
     # Show the plot
     plt.savefig(f"{mode}/{folder_name}/phases_data.png")
@@ -314,8 +403,8 @@ def get_one_huge_data_file(folder_name, array_size=100):
         g_mju, g_sig = file[:-7].split("_")
         data = pickle.load(open(folder_path+file, "rb"))
 
-        g_mju = np.round(float(g_mju), 4)
-        g_sig = np.round(float(g_sig), 4)
+        g_mju = np.round(float(g_mju), DIGITS)
+        g_sig = np.round(float(g_sig), DIGITS)
 
         params = data["params"]
 
@@ -352,9 +441,9 @@ def get_graph_file(folder_name, mode="unif_random_voronoi"):
     i=0
 
     for g_mju in np.arange(0.1, 0.5, 0.005):
-        g_mju = np.round(g_mju, 4)
+        g_mju = np.round(g_mju, DIGITS)
         for g_sig in np.arange(0.001,0.1, 0.001):
-            g_sig = np.round(g_sig, 4)
+            g_sig = np.round(g_sig, DIGITS)
             print(g_mju, g_sig)
             try:
                 
@@ -399,22 +488,22 @@ def profile_time(f, top_time):
     print(s.getvalue())
 
 #============================== PARAMETERS ================================
-W,H = 100,100 # Size of the automaton
-array_size = W
+array_size = 100
+W,H = array_size, array_size # Size of the automaton
 dt = 0.1 # Time step size
 num_channels= 1
 mode = "unif_random_voronoi"
 
-
-
-beta = [1.0, 0.5]
+#beta = [1.0, 0.5, 0.4] # Beta values for the kernel
+beta = [1.0]
 k_mju = [0.5]
 k_sig = [0.15]
 
-func_k = 'quad4'
+func_k = 'exp'
+k_size = 27
 
 params = {
-    'k_size': 57, 
+    'k_size': k_size, 
     'mu': jnp.array([[[0.15]]]), 
     'sigma': jnp.array([[[0.015]]]), 
     'beta': jnp.array([[[beta]]]), 
@@ -424,24 +513,78 @@ params = {
     'func_k': func_k,
 }
 
-
-
 lenia = MultiLeniaJAX((W, H), batch=1, num_channels=1, dt=0.1, params=params)
 folder_name = lenia.kernel_folder
 kernel_path = lenia.kernel_path
+print("folder name: ", folder_name)
 
+
+# PRINT PHASE SPACE FROM DATA FOLDER
+print_graph(folder_name, mju_lim=0.7, sig_lim=0.2, mode=mode, array_size=array_size)
+
+#path = f'unif_random_voronoi/0.5_0.15_27/data/0.32_0.161.pickle'
+#file = open(path, "rb")
+#data = pickle.load(file)['100']
+
+#print(data.keys())
 
 #================================================================================
 
-print_graph(folder_name, array_size=200)
+
+
+
+
+
+
+
+
+
+
+
+
+""" #print_graph_zoom(folder_name, mu_start=0.25, mu_end=0.27, mu_step=0.0005, sig_start=0.028, sig_end=0.032, sig_step=0.0001, save_filename="phases_data_zoomin.png", mode=mode, array_size=array_size)
+
 
 global_phase = "max"
 local_phase = "max"
 
-g_mju_range = np.arange(0.1, 0.5, 0.005)
-g_sig_range = np.arange(0.001,0.1, 0.001)
+g_mju_range = np.arange(0.2, 0.201, 0.005)
+g_sig_range = np.arange(0.025,0.02501, 0.001)
 
+
+
+beta = [1.0]
+k_mju = [0.5]
+k_sig = [0.15]
+
+func_k = 'exp'
+k_size = 27
+
+
+mu = 0.2
+sig = 0.025
+polygon_size = 30
+sample = 12
+
+params = {
+    'k_size': k_size, 
+    'mu': jnp.array([[[mu]]]), 
+    'sigma': jnp.array([[[sig]]]), 
+    'beta': jnp.array([[[beta]]]), 
+    'mu_k': jnp.array([[[k_mju]]]), 
+    'sigma_k': jnp.array([[[k_sig]]]), 
+    'weights': jnp.array([[[1.0]]]),
+    'func_k': func_k,
+}
+
+
+
+#get_video(folder_name, params, polygon_size, sample, mode="unif_random_voronoi", array_size=200, time_steps=100, device='cuda')
+    
 
 #get_one_huge_data_file(kernel_path)
+#print("folder name: ", folder_name)
 
-#get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, mode="unif_random_voronoi", array_size=200)
+#plot_phase_proportion(folder_name, mode=mode, array_size=array_size)
+
+#get_all_phase_videos(folder_name, global_phase, local_phase, g_mju_range, g_sig_range, k_mju, k_sig, beta, func_k, k_size, mode="unif_random_voronoi", array_size=100) """
