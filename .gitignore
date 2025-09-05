@@ -3,7 +3,6 @@ utils/*.pickle
 *.pickle
 *.json
 *.gif
-*.png
 *.zip
 
 #ignore everything in .venv directory
@@ -15,3 +14,5 @@ utils/*.pickle
 ./unif_random_voronoi/0.5_0.15_27_old/all_data.json
 ./utils/polygons200.pickle
 ./lenia_numpy_fft.py
+./batch_approx_phases_jax_rescan.py
+

@@ -339,8 +339,8 @@ def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi
                 continue 
 
 
-    #fig, ax = plt.subplots(figsize=(8, 6))
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=(8, 6))
+    #fig, ax = plt.subplots(figsize=(4, 3))
 
     # Set limits for x and y axes (similar to the image)
     ax.set_xlim(0, sig_lim)
@@ -357,14 +357,14 @@ def print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode="unif_random_voronoi
     #ax.grid(True, which='minor', color='lightgray', linestyle='--', linewidth=0.5)
 
     # Set major and minor ticks
-    #ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 2)])  # Major ticks every 0.02
-    #ax.set_yticks([i / 10 for i in range(1, int(10*mju_lim)+1)])  # Major ticks every 0.1
-    #ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 1)], minor=True)  # Minor ticks every 0.01
-    #ax.set_yticks([i / 100 for i in range(10, int(100*mju_lim)+1, 5)], minor=True)  # Minor ticks every 0.05
+    ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 2)])  # Major ticks every 0.02
+    ax.set_yticks([i / 10 for i in range(1, int(10*mju_lim)+1)])  # Major ticks every 0.1
+    ax.set_xticks([i / 100 for i in range(0, int(100*sig_lim)+1, 1)], minor=True)  # Minor ticks every 0.01
+    ax.set_yticks([i / 100 for i in range(10, int(100*mju_lim)+1, 5)], minor=True)  # Minor ticks every 0.05
 
     # Set labels for axes (σ and μ)
-    #ax.set_xlabel(r'$\sigma$', fontsize=14)
-    #ax.set_ylabel(r'$\mu$', fontsize=14)
+    ax.set_xlabel(r'$\sigma$', fontsize=14)
+    ax.set_ylabel(r'$\mu$', fontsize=14)
     size=5
     #size=3
 
