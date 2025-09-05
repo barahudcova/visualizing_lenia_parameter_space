@@ -488,19 +488,19 @@ def profile_time(f, top_time):
     print(s.getvalue())
 
 #============================== PARAMETERS ================================
-array_size = 100
+array_size = 200
 W,H = array_size, array_size # Size of the automaton
 dt = 0.1 # Time step size
 num_channels= 1
 mode = "unif_random_voronoi"
 
 #beta = [1.0, 0.5, 0.4] # Beta values for the kernel
-beta = [1.0]
+beta = [1.0, 0.75, 0.25, 0.75]
 k_mju = [0.5]
 k_sig = [0.15]
 
-func_k = 'exp'
-k_size = 27
+func_k = 'quad4'
+k_size = 57
 
 params = {
     'k_size': k_size, 
@@ -520,7 +520,7 @@ print("folder name: ", folder_name)
 
 
 # PRINT PHASE SPACE FROM DATA FOLDER
-print_graph(folder_name, mju_lim=0.7, sig_lim=0.2, mode=mode, array_size=array_size)
+print_graph(folder_name, mju_lim=0.5, sig_lim=0.1, mode=mode, array_size=array_size)
 
 #path = f'unif_random_voronoi/0.5_0.15_27/data/0.32_0.161.pickle'
 #file = open(path, "rb")
